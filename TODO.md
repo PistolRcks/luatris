@@ -1,5 +1,5 @@
 ## The Basics
-* Learn Blitwizard
+* Learn LÖVE
 * Grid system
 * Basic gameplay and mechanics
 
