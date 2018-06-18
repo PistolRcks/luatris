@@ -1,62 +1,62 @@
---[[TODO: Spawn tetrominoes and put their coordinates and color in block.current.set
-          Multiple block movement
-  ]]
 debug = true
 
-function anyBlockCollides(set, direction)
-   for i,v in ipairs(set) do
-     if direction == "above" then
-       if block.stored[tostring(set[i].x)..tostring(set[i].y-1)] ~= nil then return true end
-     elseif direction == "below" then
-       if block.stored[tostring(set[i].x)..tostring(set[i].y+1)] ~= nil then return true end
-     elseif direction == "left" then
-       if block.stored[tostring(set[i].x-1)..tostring(set[i].y)] ~= nil then return true end
-     elseif direction == "right" then
-       if block.stored[tostring(set[i].x+1)..tostring(set[i].y)] ~= nil then return true end
-     elseif direction == "leftedge" then
-       if set[i].x-1 == -1 then return true end
-     elseif direction == "rightedge" then
-       if set[i].x+1 == grid.width then return true end
-     elseif direction == "bottom" then
-       if set[i].y == grid.height - 1 then return true end
-     end
-   end
-   return false
-end
-
 function love.load(arg)
+  require("ltrs")
+  math.randomseed(os.time()) --Set the seed because the randomness would normally be uniform
+
   window = {}
   window.width, window.height, window.flags = love.window.getMode()
 
   block = {
     data = {img = love.graphics.newImage("assets/tiles/block.png")},
-    current = {set = {}, rotation = 0, active = false},
+    current = {set = {}, rotation = 1, active = false, tetromino = nil},
     stored = {}
   }
   block.data.width, block.data.height = block.data.img:getDimensions()
 
   tetromino = {
-    shapes = {--Offset all shapes by the top-left corner of a 2x4 rectangle
-      i = {color = {0,1,1,1}, form = {                                  -- oooo
-        {x = 0, y = 1}, {x = 1, y = 1}, {x = 2, y = 1}, {x = 3, y = 1}  -- xxxx
+    shapes = {                                                              -- Offset all shapes by the top-left corner of a 4x4 square. The separate tables inside the `form` table are the separate rotations for each tetromino.
+      i = {color = {0,1,1,1}, form = {
+        {{x = 0, y = 1}, {x = 1, y = 1}, {x = 2, y = 1}, {x = 3, y = 1}},   -- 1: oooo  2: ooxo 3: oooo 4: oxoo
+        {{x = 2, y = 0}, {x = 2, y = 1}, {x = 2, y = 2}, {x = 2, y = 3}},   --    xxxx     ooxo    oooo    oxoo
+        {{x = 0, y = 2}, {x = 1, y = 2}, {x = 2, y = 2}, {x = 3, y = 2}},   --    oooo     ooxo    xxxx    oxoo
+        {{x = 1, y = 0}, {x = 1, y = 1}, {x = 1, y = 2}, {x = 1, y = 3}}    --    oooo     ooxo    oooo    oxoo
       }},
-      o = {color = {1,1,0,1}, form = {                                  -- oxxo
-        {x = 1, y = 0}, {x = 2, y = 0}, {x = 1, y = 1}, {x = 2, y = 1}  -- oxxo
+      o = {color = {1,1,0,1}, form = {
+        {{x = 1, y = 1}, {x = 2, y = 1}, {x = 1, y = 2}, {x = 2, y = 2}},   -- 1: oooo (and the rest.)
+        {{x = 1, y = 1}, {x = 2, y = 1}, {x = 1, y = 2}, {x = 2, y = 2}},   --    oxxo
+        {{x = 1, y = 1}, {x = 2, y = 1}, {x = 1, y = 2}, {x = 2, y = 2}},   --    oxxo
+        {{x = 1, y = 1}, {x = 2, y = 1}, {x = 1, y = 2}, {x = 2, y = 2}}    --    oooo
       }},
-      j = {color = {0,0,1,1}, form = {                                  -- xooo
-        {x = 0, y = 0}, {x = 0, y = 1}, {x = 1, y = 1}, {x = 2, y = 1}  -- xxxo
+      j = {color = {0,0,1,1}, form = {
+        {{x = 0, y = 1}, {x = 0, y = 2}, {x = 1, y = 2}, {x = 2, y = 2}},   -- xxxo
+        {{x = 1, y = 1}, {x = 1, y = 2}, {x = 1, y = 3}, {x = 2, y = 1}},   --
+        {{x = 2, y = 3}, {x = 0, y = 2}, {x = 1, y = 2}, {x = 2, y = 2}},   --
+        {{x = 1, y = 1}, {x = 1, y = 2}, {x = 1, y = 3}, {x = 0, y = 3}}    --
       }},
-      l = {color = {1,0.667,0,1}, form = {                              -- ooox
-        {x = 3, y = 0}, {x = 1, y = 1}, {x = 2, y = 1}, {x = 3, y = 1}  -- oxxx
+      l = {color = {1,0.667,0,1}, form = {
+        {{x = 2, y = 1}, {x = 0, y = 2}, {x = 1, y = 2}, {x = 2, y = 2}},  -- oxxx
+        {{x = 1, y = 1}, {x = 1, y = 2}, {x = 1, y = 3}, {x = 2, y = 3}},
+        {{x = 0, y = 3}, {x = 0, y = 2}, {x = 1, y = 2}, {x = 2, y = 2}},
+        {{x = 1, y = 1}, {x = 1, y = 2}, {x = 1, y = 3}, {x = 0, y = 1}}
       }},
-      s = {color = {0,1,0,1}, form = {                                  -- ooxx
-        {x = 2, y = 0}, {x = 3, y = 0}, {x = 1, y = 1}, {x = 2, y = 1}  -- oxxo
+      s = {color = {0,1,0,1}, form = {
+        {{x = 1, y = 1}, {x = 2, y = 1}, {x = 0, y = 2}, {x = 1, y = 2}},  -- oxxo
+        {{x = 1, y = 1}, {x = 1, y = 2}, {x = 2, y = 2}, {x = 2, y = 3}},
+        {{x = 1, y = 2}, {x = 2, y = 2}, {x = 0, y = 3}, {x = 1, y = 3}},
+        {{x = 0, y = 1}, {x = 0, y = 2}, {x = 1, y = 2}, {x = 1, y = 3}}
       }},
-      z = {color = {1,0,0,1}, form = {                                  -- xxoo
-        {x = 0, y = 0}, {x = 1, y = 0}, {x = 1, y = 1}, {x = 2, y = 1}  -- oxxo
+      z = {color = {1,0,0,1}, form = {
+        {{x = 0, y = 1}, {x = 1, y = 1}, {x = 1, y = 2}, {x = 2, y = 2}},  -- oxxo
+        {{x = 2, y = 1}, {x = 1, y = 2}, {x = 2, y = 2}, {x = 1, y = 3}},
+        {{x = 0, y = 2}, {x = 1, y = 2}, {x = 1, y = 3}, {x = 2, y = 3}},
+        {{x = 1, y = 1}, {x = 0, y = 2}, {x = 1, y = 2}, {x = 0, y = 3}}
       }},
-      t = {color = {0.667,0,1,1}, form = {                              -- oxoo
-        {x = 1, y = 0}, {x = 0, y = 1}, {x = 1, y = 1}, {x = 2, y = 1}  -- xxxo
+      t = {color = {0.667,0,1,1}, form = {                                 -- oxoo
+        {{x = 1, y = 1}, {x = 0, y = 2}, {x = 1, y = 2}, {x = 2, y = 2}},  -- xxxo
+        {{x = 1, y = 1}, {x = 1, y = 2}, {x = 1, y = 3}, {x = 2, y = 2}},
+        {{x = 0, y = 2}, {x = 1, y = 2}, {x = 2, y = 2}, {x = 1, y = 3}},
+        {{x = 0, y = 2}, {x = 1, y = 1}, {x = 1, y = 2}, {x = 1, y = 3}}
       }}
     },
     list = {"i","o","j","l","s","z","t"},
@@ -121,16 +121,18 @@ function love.update(dt)
     if game.gravity.tick == nil then
       game.gravity.tick = love.timer.getTime()
     elseif (love.timer.getTime() - game.gravity.tick) >= game.gravity.max and block.current.active == true then
-      if anyBlockCollides(block.current.set, "bottom") or anyBlockCollides(block.current.set, "below") then
+      if ltrs.blockCollides(block.current.set, "bottom") or ltrs.blockCollides(block.current.set, "below") then
         --Store the block and get a new one. Each block's data is stored in block.stored with a key which is a concatenation of its xcoord and ycoord.
         block.current.active = false
         for i,v in ipairs(block.current.set) do
           block.stored[tostring(block.current.set[i].x)..tostring(block.current.set[i].y)] = {x = block.current.set[i].x, y = block.current.set[i].y, color = block.current.color} --This will eventually have to be done for every block in a tetromino
         end
       else
-        for i,v in ipairs(block.current.set) do
-          print("["..tostring(block.current.set[i].x)..", "..tostring(block.current.set[i].y).."]")
-        end
+        --Debugging purposes
+        --for i,v in ipairs(block.current.set) do
+        --  print("["..tostring(block.current.set[i].x)..", "..tostring(block.current.set[i].y).."]")
+        --end
+        --Drop all blocks in the current set by one
         for i=1,4 do
           block.current.set[i].y = block.current.set[i].y + 1
         end
@@ -152,24 +154,69 @@ function love.update(dt)
       table.remove(tetromino.nextList, 1)
 
       --Create the blocks
-      for i,v in ipairs(tetromino.shapes[nextTetromino].form) do
+      for i,v in ipairs(tetromino.shapes[nextTetromino].form[1]) do
         block.current.set[i] = {
-          x = tetromino.shapes[nextTetromino].form[i].x + grid.tetrominoStartingPosition,
-          y = tetromino.shapes[nextTetromino].form[i].y - 2
+          x = tetromino.shapes[nextTetromino].form[1][i].x + grid.tetrominoStartingPosition,
+          y = tetromino.shapes[nextTetromino].form[1][i].y - 3
         }
       end
-      block.current.active, block.current.rotation, block.current.color = true, 0, tetromino.shapes[nextTetromino].color
+      block.current.active, block.current.rotation, block.current.color, block.current.tetromino = true, 1, tetromino.shapes[nextTetromino].color, nextTetromino
     end
 
     --Controls--
+    --Rotation
+    --This could also be made more efficient.
+    if love.keyboard.isDown("x") and block.current.tetromino ~= "o" and not rotateHeld then --You wouldn't rotate an "o" tetromino...
+      print("Starting Rotation...")
+      local newRotation
+      if block.current.rotation < 4 then
+        newRotation = block.current.rotation + 1
+      else
+        newRotation = 1
+      end
+      print("New rotation is "..newRotation)
+      local rotatePos = ltrs.testRotation(block.current.set, block.current.tetromino, block.current.rotation, newRotation)
+      if rotatePos ~= false then
+        block.current.set = rotatePos
+        block.current.rotation = newRotation
+        print("Rotation succeeded!")
+      else
+        print("Rotation failed!")
+      end
+      rotateHeld = true
+    end
+    if love.keyboard.isDown("z") and block.current.tetromino ~= "o" and not rotateHeld then --You wouldn't rotate an "o" tetromino... again
+      print("Starting Rotation...")
+      local newRotation
+      if block.current.rotation > 1 then
+        newRotation = block.current.rotation - 1
+      else
+        newRotation = 4
+      end
+      print("New rotation is "..newRotation)
+      local rotatePos = ltrs.testRotation(block.current.set, block.current.tetromino, block.current.rotation, newRotation)
+      if rotatePos ~= false then
+        block.current.set = rotatePos
+        block.current.rotation = newRotation
+        print("Rotation succeeded!")
+      else
+        print("Rotation failed!")
+      end
+      rotateHeld = true
+    end
+
+    if not love.keyboard.isDown("x") and not love.keyboard.isDown("z") and rotateHeld then
+      rotateHeld = false
+    end
+
     --Left and Right--
     --Is this efficient? I don't think so. Will I do it? Yes.
-    if love.keyboard.isDown("left") and (love.timer.getTime() - game.controls.pressStart) >= 0.25 and block.current.active == true and not anyBlockCollides(block.current.set, "left") and not anyBlockCollides(block.current.set, "leftedge") then
+    if love.keyboard.isDown("left") and (love.timer.getTime() - game.controls.pressStart) >= 0.25 and block.current.active == true and not ltrs.blockCollides(block.current.set, "left") and not ltrs.blockCollides(block.current.set, "leftedge") then
       for i=1,4 do
         block.current.set[i].x = block.current.set[i].x - 1
       end
       game.controls.pressStart = love.timer.getTime()
-    elseif love.keyboard.isDown("right") and (love.timer.getTime() - game.controls.pressStart) >= 0.25 and block.current.active == true and not anyBlockCollides(block.current.set, "right") and not anyBlockCollides(block.current.set, "rightedge") then
+    elseif love.keyboard.isDown("right") and (love.timer.getTime() - game.controls.pressStart) >= 0.25 and block.current.active == true and not ltrs.blockCollides(block.current.set, "right") and not ltrs.blockCollides(block.current.set, "rightedge") then
       for i=1,4 do
         block.current.set[i].x = block.current.set[i].x + 1
       end
@@ -178,6 +225,8 @@ function love.update(dt)
     if not love.keyboard.isDown("left") and not love.keyboard.isDown("right") then --Reset the press cooldown when nothing is pressed down
       game.controls.pressStart = 0
     end
+
+
     --Fast Drop--
     if love.keyboard.isDown("down") then
       game.gravity.max = game.gravity.double
@@ -197,6 +246,8 @@ function love.draw(dt)
       for i=1,4 do
         love.graphics.draw(block.data.img, block.current.set[i].x * block.data.width, block.current.set[i].y * block.data.height)
       end
+      love.graphics.setColor(1,0,0,0.5)
+      love.graphics.draw(block.data.img, (block.current.set[1].x - tetromino.shapes[block.current.tetromino].form[block.current.rotation][1].x) * block.data.width, (block.current.set[1].y - tetromino.shapes[block.current.tetromino].form[block.current.rotation][1].y) * block.data.height)
       love.graphics.setColor(1,1,1,1)
     end
     for k,v in pairs(block.stored) do
@@ -206,7 +257,7 @@ function love.draw(dt)
     love.graphics.setColor(1,1,1,1)
   love.graphics.pop()
   love.graphics.print(love.timer.getFPS().." fps")
-  love.graphics.print("Block Size: "..grid.scaleFactor.width.."px\nNext Blocks: "..table.concat(tetromino.nextList,", "), 100, 124)
+  love.graphics.print("Block Size: "..grid.scaleFactor.width.."px\nNext Blocks: "..table.concat(tetromino.nextList,", ").."\nCurrent Tetromino: "..tostring(block.current.tetromino), 100, 124)
   if quitmessage then
     love.graphics.print("Quitting in "..math.abs(math.ceil(quittimer)).."...", 100, 100)
   end
