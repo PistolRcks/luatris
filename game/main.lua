@@ -75,7 +75,7 @@ function love.load(arg)
   game = {
     controls = {pressStart = 0},
     gravity = {tick = nil, max = 0.25},
-    isPaused = nil, started = false
+    isPaused = false, started = false
   }
   game.gravity.normal, game.gravity.double = game.gravity.max, game.gravity.max/2
 
@@ -93,17 +93,28 @@ function love.update(dt)
   if not love.keyboard.isDown("escape") then --Reset stuff
     quittimer = 3
     quitmessage = false
+    escPressed = false
   end
-  if love.keyboard.isDown("escape") then --Good ol' hold-to-quit, thanks toby
-    quitmessage = true
-    quittimer = quittimer - dt
-    if quittimer < 0 then
-      love.event.push("quit")
+  if love.keyboard.isDown("escape") then
+    if not escPressed and game.started then
+      if game.isPaused == true then
+        game.isPaused = false
+      else
+        game.isPaused = true
+      end
+      escPressed = true --To avoid spam while holding the key
+    else
+      --Good ol' hold-to-quit, thanks toby
+      quitmessage = true
+      quittimer = quittimer - dt
+      if quittimer < 0 then
+        love.event.push("quit")
+      end
     end
   end
 
   --Countdown at the beginning of the game
-  if game.started == false then
+  if game.started == false and game.isPaused == false then
     if countdownTimerStart == nil then
       countdownTimerStart = love.timer.getTime()
     end
@@ -118,14 +129,66 @@ function love.update(dt)
   --Game Logic--
   if game.isPaused == false and game.started == true then
     --Gravity--
-    if game.gravity.tick == nil then
+    if game.gravity.tick == nil then --If there is no gravity tick, get one
       game.gravity.tick = love.timer.getTime()
-    elseif (love.timer.getTime() - game.gravity.tick) >= game.gravity.max and block.current.active == true then
-      if ltrs.blockCollides(block.current.set, "bottom") or ltrs.blockCollides(block.current.set, "below") then
-        --Store the block and get a new one. Each block's data is stored in block.stored with a key which is a concatenation of its xcoord and ycoord.
+    elseif (love.timer.getTime() - game.gravity.tick) >= game.gravity.max and block.current.active == true then --On every gravity tick, when a block is active...
+      if ltrs.blockCollides(block.current.set, "bottom") or ltrs.blockCollides(block.current.set, "below") then --...and a block collides with the bottom of the grid or another block below it...
         block.current.active = false
+        --Store the block. Each block's data is stored in block.stored with a key which is a concatenation of its xcoord and ycoord.
         for i,v in ipairs(block.current.set) do
-          block.stored[tostring(block.current.set[i].x)..tostring(block.current.set[i].y)] = {x = block.current.set[i].x, y = block.current.set[i].y, color = block.current.color} --This will eventually have to be done for every block in a tetromino
+          block.stored[tostring(block.current.set[i].x)..tostring(block.current.set[i].y)] = {x = block.current.set[i].x, y = block.current.set[i].y, color = block.current.color}
+        end
+        --Find layers which are full
+        local layer = {destroyed = {}}
+        for i,v in ipairs(block.current.set) do
+          layer[tostring(block.current.set[i].y)] = {finished, full}
+          if layer[tostring(block.current.set[i].y)].finished ~= true then --Don't redo layers that are already done
+            for x = 0, grid.width - 1 do
+              if block.stored[tostring(x)..tostring(block.current.set[i].y)] ~= nil then
+                layer[tostring(block.current.set[i].y)].full = true
+                print("Layer "..i.." is full at block "..x)
+              else --If one of the blocks is not doesn't exist in a line, stop.
+                layer[tostring(block.current.set[i].y)].full = false
+                print("Layer "..i.." not full at block "..x)
+                break
+              end
+            end
+          end
+          layer[tostring(block.current.set[i].y)].finished = true --Set the layer as done
+        end
+        --Destroy layers which are full
+        for k,v in pairs(layer) do
+          if layer[k].full then
+            print("Destroying layer "..k)
+            for x = 0, 9 do
+              block.stored[tostring(x)..tostring(k)] = nil
+            end
+            table.insert(layer.destroyed, k)
+          end
+        end
+        
+        table.sort(layer.destroyed) --Sort the table, lowest first, so that the top is pulled down first, then the ones below it as top not leave empty lines
+
+        --Shift down destroyed layers
+        for i,v in ipairs(layer.destroyed) do
+          print("Starting at line "..v)
+          for y = v-1, 0, -1 do
+            print(" Starting to shift down line "..y)
+            local blockExists = 0
+            for x = 0, 9 do
+              if block.stored[tostring(x)..tostring(y)] ~= nil then --Bring down blocks that exist
+                blockExists = blockExists + 1
+                block.stored[tostring(x)..tostring(y+1)] = {x = block.stored[tostring(x)..tostring(y)].x, y = block.stored[tostring(x)..tostring(y)].y + 1 , color = block.stored[tostring(x)..tostring(y)].color}
+                block.stored[tostring(x)..tostring(y)] = nil --Get rid of the old block
+                print("   Shifting down block at ["..x..","..y.."]".."; new pos at ["..x..","..(y+1).."]")
+              else
+                print("   Not shifting down block "..x)
+              end
+            end
+            --if blockExists == 0 then --If there are no blocks in a line, stop destroying lines
+            --  break
+            --end
+          end
         end
       else
         --Debugging purposes
@@ -233,12 +296,19 @@ function love.update(dt)
     elseif not love.keyboard.isDown("down") then
       game.gravity.max = game.gravity.normal
     end
+
+    if block.stored["3-2"] ~= nil or block.stored["4-2"] ~= nil or block.stored["5-2"] ~= nil or block.stored["6-2"] ~= nil then --Eventually, add a gameover sequence to losing
+      print("You lose!")
+      game.isPaused = true
+    end
   end
 end
 
 function love.draw(dt)
   love.graphics.setNewFont(12)
-  love.graphics.draw(bggrid.img,bggrid.quad,0,0)
+  love.graphics.draw(bggrid.img,bggrid.quad,0,0) --Draw the background grid
+
+  --Block drawing
   love.graphics.push()
     love.graphics.scale(grid.scaleFactor.width/block.data.width) --Adaptive window rescaling
     if block.current.active == true then
@@ -246,9 +316,6 @@ function love.draw(dt)
       for i=1,4 do
         love.graphics.draw(block.data.img, block.current.set[i].x * block.data.width, block.current.set[i].y * block.data.height)
       end
-      love.graphics.setColor(1,0,0,0.5)
-      love.graphics.draw(block.data.img, (block.current.set[1].x - tetromino.shapes[block.current.tetromino].form[block.current.rotation][1].x) * block.data.width, (block.current.set[1].y - tetromino.shapes[block.current.tetromino].form[block.current.rotation][1].y) * block.data.height)
-      love.graphics.setColor(1,1,1,1)
     end
     for k,v in pairs(block.stored) do
       love.graphics.setColor(block.stored[k].color)
@@ -256,17 +323,24 @@ function love.draw(dt)
     end
     love.graphics.setColor(1,1,1,1)
   love.graphics.pop()
+
+  --Other stuff
   love.graphics.print(love.timer.getFPS().." fps")
   love.graphics.print("Block Size: "..grid.scaleFactor.width.."px\nNext Blocks: "..table.concat(tetromino.nextList,", ").."\nCurrent Tetromino: "..tostring(block.current.tetromino), 100, 124)
   if quitmessage then
     love.graphics.print("Quitting in "..math.abs(math.ceil(quittimer)).."...", 100, 100)
   end
 
-  if countdownTimer ~= nil and not (countdownTimer >= 3) then
-    love.graphics.setFont(font.hobo.h2)
+  love.graphics.setFont(font.hobo.h2)
+  --Pause text
+  if game.isPaused and game.started then
+    love.graphics.print("Paused!", (window.width/2)-(font.hobo.h2:getWidth("Paused!")/2), (window.height/2)-(font.hobo.h2:getAscent()/2))
+  end
+
+  --Countdown timer
+  if countdownTimer ~= nil and not (countdownTimer >= 3) and not game.isPaused then
     love.graphics.print(math.ceil(countdownTimer), (window.width/2)-(font.hobo.h2:getWidth(math.ceil(countdownTimer))/2), (window.height/2)-(font.hobo.h2:getAscent()/2)) --Centering is hard
-  elseif countdownTimer >= 3 and countdownTimer <= 4 then
-    love.graphics.setFont(font.hobo.h2)
+  elseif countdownTimer >= 3 and countdownTimer <= 4 and not game.isPaused then
     love.graphics.print("Go!", (window.width/2)-(font.hobo.h2:getWidth("Go!")/2), (window.height/2)-(font.hobo.h2:getAscent()/2))
   end
 end
