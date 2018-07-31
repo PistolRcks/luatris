@@ -5,6 +5,9 @@ A version of the classic four-piece block game in Lua through LÖVE. Because why
 * Lua 5.1
 * LÖVE 11.1
 
+## "Builds"
+You can find builds of the game under the releases tab. Currently, only Windows and Linux are supported. AppImages are coming soon (tm).
+
 ## Running
 Run `love game` in the `luatris` folder. Simple as that.
 If you don't have LÖVE installed on your computer, provide the path to the executable instead of `love`
