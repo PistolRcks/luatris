@@ -1,4 +1,5 @@
 --"ltrs" library by PistolRcks. Includes useful functions for Luatris.
+require "util.util"
 ltrs = {}
 
 --Vector subtract and add function paraphrased from Starbound's "vec2" table because I'm lazy
@@ -7,6 +8,16 @@ function ltrs.vecSub(vec1, vec2)
 end
 function ltrs.vecAdd(vec1, vec2)
   return {x = vec1.x + vec2.x, y = vec1.y + vec2.y}
+end
+
+--Picks random tetrominoes if there are none or less than one bag (this is the "bag shuffle" btw)
+function ltrs.bagShuffle()
+  if tetromino.nextList == nil or #tetromino.nextList < 7 then
+    local bag = util.shuffle(tetromino.list) --Shuffle up a bag of all the pieces
+    for i=1,7 do
+      table.insert(tetromino.nextList, bag[i])
+    end
+  end
 end
 
 function ltrs.blockCollides(set_or_pos, dir)
@@ -70,6 +81,8 @@ ltrs.rotationData = { --Super Rotation System data (http://tetris.wikia.com/wiki
   }
 }
 
+
+
 function ltrs.testRotation(set, piece, currentRotation, newRotation)
   local referenceCorner = ltrs.vecSub(block.current.set[1], tetromino.shapes[piece].form[currentRotation][1]) --Get the corner in grid coordinates to translate with local coordinates
   local rotationChange = currentRotation.."-"..newRotation --Concatenation of the current and new rotations for use with the ltrs.rotationData
@@ -87,7 +100,7 @@ function ltrs.testRotation(set, piece, currentRotation, newRotation)
     for block = 1, 4 do
       --The test position is the vector addition of the reference corner (in grid coordinates), the current block's new rotation (in local coordinates) and the current test's offset (local coords, see ltrs.rotationData)
       local testPos = ltrs.vecAdd(ltrs.vecAdd(referenceCorner, tetromino.shapes[piece].form[newRotation][block]), ltrs.rotationData[dataSet][rotationChange][test])
-      if not ltrs.blockCollides(testPos, "pos") and testPos.x < grid.width and testPos.x >= 0 and testPos.y <= grid.height then --If a block is not in the same position as the test position, then add it to the new position table
+      if not ltrs.blockCollides(testPos, "pos") and testPos.x < grid.width and testPos.x >= 0 and testPos.y <= (grid.height-1) then --If a block is not in the same position as the test position, then add it to the new position table
         print("   Block "..block.." succeeded on test "..test.." at position ["..testPos.x..", "..testPos.y.."]!")
         newPos[block] = testPos
       else --If one piece fails the test, scrap the entire thing and break the current test

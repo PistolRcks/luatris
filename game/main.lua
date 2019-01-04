@@ -1,19 +1,29 @@
-debug = true
+--TODO: Optimize and garbage collect; draw function is taking up a lot of memory (ok I really don't know what's going on)
+--TODO: Create animation management system
 
 function love.load(arg)
-  require("ltrs")
-  math.randomseed(os.time()) --Set the seed because the randomness would normally be uniform
+  require("lib/ltrs")
+  require("lib/util")
+  require("lib/gfx")
+  math.randomseed(os.time()) --Set the seed because Lua is pseudorandom
+  love.graphics.setDefaultFilter("nearest", "nearest")
 
   window = {}
   window.width, window.height, window.flags = love.window.getMode()
 
+  --Load spritesheets
+  sprite = {main = {img = love.graphics.newImage("assets/tiles/mainSpritesheet.png"), sheet = {}}}
+  for x=1,7 do --The spritesheet supports 64 sprites, but we're currently only using 7.
+    sprite.main.sheet[x] = love.graphics.newQuad((x-1)*8, 0, 8, 8, 64, 64)
+  end
+
   block = {
-    data = {img = love.graphics.newImage("assets/tiles/block.png"), imgShade = love.graphics.newImage("assets/tiles/blockShade.png")},
+    data = {},
     current = {set = {}, color = {}, rotation = 1, active = false, tetromino = nil, held = nil},
     stored = {},
     hardDropPos = {}
   }
-  block.data.width, block.data.height = block.data.img:getDimensions()
+  block.data.width, block.data.height = 8, 8
 
   tetromino = {
     shapes = {                                                              -- Offset all shapes by the top-left corner of a 4x4 square. The separate tables inside the `form` table are the separate rotations for each tetromino.
@@ -61,17 +71,31 @@ function love.load(arg)
       }}
     },
     list = {"i","o","j","l","s","z","t"},
-    nextList = {},
-    nextMax = 5
+    nextList = {}
   }
   grid = {width = 10, height = 20}
+  grid.playfield = {height = window.height * 0.9} --The playfield's width will be based off of this because its height will always be centered on the window, whereas the width will not
+  grid.playfield.width = (grid.playfield.height * grid.width) / grid.height --Good ol' cross multiplication solves this scaling problem
 
-  grid.scaleFactor = {width = window.width/grid.width, height = window.height/grid.height}
+  grid.scaleFactor = {width = math.ceil(grid.playfield.width/grid.width), height = math.ceil(grid.playfield.height/grid.height)}
   grid.tetrominoStartingPosition = math.floor((grid.width - 4) / 2)
 
-  bggrid = {img = love.graphics.newImage("assets/tiles/backgroundgrid.png")}
-  bggrid.quad = love.graphics.newQuad(0,0,window.width,window.height,grid.scaleFactor.width,grid.scaleFactor.width)
-  bggrid.img:setWrap("repeat","repeat")
+  bggrid = {edgeImg = love.graphics.newImage("assets/tiles/playfieldedge.png"), cornerImg = love.graphics.newImage("assets/tiles/playfieldcorner.png")}
+
+  bggrid.canvas = love.graphics.newCanvas(8,8)
+  love.graphics.setCanvas(bggrid.canvas) --Create the texture canvas to make the sprite able to be used in a spriteBatch
+    love.graphics.draw(sprite.main.img, sprite.main.sheet[3])
+  love.graphics.setCanvas()
+
+  bggrid.spriteBatch = love.graphics.newSpriteBatch(bggrid.canvas)
+  for y=0, (grid.height-1) do
+    for x=0, (grid.width-1) do
+      bggrid.spriteBatch:add(x*8,y*8)
+    end
+  end
+
+  bggrid.vertEdgeQuad = love.graphics.newQuad(0, 0, grid.scaleFactor.width, grid.playfield.height, grid.scaleFactor.width, grid.scaleFactor.width)
+  bggrid.horizEdgeQuad = love.graphics.newQuad(0, 0, grid.scaleFactor.width, grid.playfield.width, grid.scaleFactor.width, grid.scaleFactor.width)
 
   game = {
     controls = {
@@ -86,30 +110,34 @@ function love.load(arg)
     },
     linesCleared = 0,
     currentCombo = 0,
-    gravity = {tick = nil, groundTimer = 0, groundMax = 0.5, softDropMulti = 4}, --TODO: Eventually, the gravity max and the ground max will be adaptive based on the current level
+    timePlayed = 0,
+    gravity = {tick = nil, groundTimer = 0, groundMax = 0.5, softDrop = 0.01667}, --TODO: Eventually, the gravity max and the ground max will be adaptive based on the current level
     isPaused = false, started = false
   }
   game.gravity.max = 0.5/math.floor((game.linesCleared+10)/10) --Early difficulty implementation
-  game.gravity.normal, game.gravity.softDrop = game.gravity.max, (game.gravity.max/game.gravity.softDropMulti)
+  game.gravity.normal = game.gravity.max
 
   animation = {
     quitMessage = false,
     lineClear = {message = nil, fade = 0}
   }
 
+  local textScaleFactor = math.max(window.width, window.height) * 0.001
+
   font = {
     hobo = {
-      h2 = love.graphics.newFont("/assets/fonts/hobo.ttf", 64),
-      h3 = love.graphics.newFont("/assets/fonts/hobo.ttf", 48),
-      h4 = love.graphics.newFont("/assets/fonts/hobo.ttf", 32)
+      h2 = love.graphics.newFont("/assets/fonts/hobo.ttf", math.min(64, math.ceil(64 * textScaleFactor))),
+      h3 = love.graphics.newFont("/assets/fonts/hobo.ttf", math.min(48, math.ceil(48 * textScaleFactor))),
+      h4 = love.graphics.newFont("/assets/fonts/hobo.ttf", math.min(32, math.ceil(32 * textScaleFactor)))
     }
   }
 end
 
 function love.update(dt)
   --Utilities
-  window.width, window.height, window.flags = love.window.getMode() --Setting this in the update function for adaptive window resizing (which really doesn't work correctly as of right now)
-  grid.scaleFactor = {width = window.width/grid.width, height = window.height/grid.height}
+  --TODO: EVENTUALLY, dynamic rescaling will be re-added in, but for now, that's too much hassle.
+  --window.width, window.height, window.flags = love.window.getMode() --Setting this in the update function for adaptive window resizing (which really doesn't work correctly as of right now)
+  --grid.scaleFactor = {width = window.width/grid.width, height = window.height/grid.height}
 
   if not love.keyboard.isDown("escape") then --Reset stuff
     quittimer = 3
@@ -119,11 +147,8 @@ function love.update(dt)
   if love.keyboard.isDown("escape") then
     --Game pausing
     if not game.controls.keypress.esc and game.started then
-      if game.isPaused == true then
-        game.isPaused = false
-      else
-        game.isPaused = true
-      end
+      game.isPaused = not game.isPaused
+      --collectgarbage("collect")
       game.controls.keypress.esc = true --To avoid spam while holding the key
     else
       --Good ol' hold-to-quit, thanks toby
@@ -148,8 +173,11 @@ function love.update(dt)
     end
   end
 
-  --Game Logic--
+  --Main Game Loop--
   if game.isPaused == false and game.started == true then
+    --Game timer
+    game.timePlayed = game.timePlayed + dt
+
     --Gravity--
     if game.gravity.tick == nil then --If there is no gravity tick, get one
       game.gravity.tick = love.timer.getTime()
@@ -233,7 +261,7 @@ function love.update(dt)
       --Update game gravity after clearing lines
       game.linesCleared = game.linesCleared + #layer.destroyed
       game.gravity.max = 0.5/math.floor((game.linesCleared+10)/10)
-      game.gravity.normal, game.gravity.softDrop = game.gravity.max, (game.gravity.max/game.gravity.softDropMulti)
+      game.gravity.normal = game.gravity.max
       --Stuff for the animation which plays when the player clears a line
       if #layer.destroyed == 4 then
         animation.lineClear.message = "Quadruple!"
@@ -252,6 +280,7 @@ function love.update(dt)
       end
       print("Checked line destruction @ "..love.timer.getTime())
       game.event.setBlock = false
+      --collectgarbage("collect") --This should stem the flow of the memory leak issue until I figure out what's the problem
     end
 
     if animation.lineClear.fade >= 0 then
@@ -260,14 +289,7 @@ function love.update(dt)
 
     --Block Spawning--
     if block.current.active == false then
-      --Pick random tetrominoes if there are none
-      if next(tetromino.nextList) == nil then
-        for i=1,tetromino.nextMax+1 do --Adding one because we remove one just after this, thus keeping the max at its correct number
-          tetromino.nextList[i] = tetromino.list[math.random(1, 7)]
-        end
-      else
-        tetromino.nextList[table.getn(tetromino.nextList)+1] = tetromino.list[math.random(1, 7)]
-      end
+      ltrs.bagShuffle() --See util/ltrs.lua for more
       local nextTetromino = tetromino.nextList[1]
       table.remove(tetromino.nextList, 1)
 
@@ -387,7 +409,7 @@ function love.update(dt)
       local nextHeld = block.current.tetromino
       local newTetromino
       if block.current.held == nil then --We need to create a new block
-        tetromino.nextList[table.getn(tetromino.nextList)+1] = tetromino.list[math.random(1, 7)]
+        ltrs.bagShuffle()
         newTetromino = tetromino.nextList[1]
         table.remove(tetromino.nextList, 1)
       else --We'll just get the new block from the one that's held
@@ -420,38 +442,97 @@ function love.update(dt)
   end
 end
 
+--Pause the game on focus lost
+function love.focus(f)
+  if f == false then
+    game.isPaused = true
+  end
+end
+
 function love.draw(dt)
-  love.graphics.setNewFont(12)
-  love.graphics.draw(bggrid.img,bggrid.quad,0,0) --Draw the background grid
+  local offset = window.height * 0.05
+  local scalar = grid.scaleFactor.width/block.data.width
+  local scalarOffset = offset/scalar --When scaling, the x and y positions are scaled with the scalar. To circumvent this, we'll use this
+  local draw = love.graphics.draw --Saves cycles
+
+  love.graphics.setColor(0.1,0.1,0.1,1)
+  love.graphics.rectangle("fill", 0, 0, window.width, window.height) --This will eventually be able to be customized, and you will be able to choose your own background
+  love.graphics.setColor(1,1,1,1)
+  --Draw the edges of the playfield
+  local edgeOffset = grid.scaleFactor.width
+  local widthLength = grid.playfield.width + offset
+  bggrid.edgeImg:setWrap("clamp","repeat")
+  draw(bggrid.edgeImg, bggrid.vertEdgeQuad, offset - edgeOffset, offset) --Left edge
+  draw(bggrid.edgeImg, bggrid.vertEdgeQuad, widthLength + edgeOffset, offset, 0, -1, 1) --Right edge
+  bggrid.edgeImg:setWrap("repeat","clamp")
+  draw(bggrid.edgeImg, bggrid.horizEdgeQuad, widthLength, offset - edgeOffset, math.pi/2) --Top edge
+  draw(bggrid.edgeImg, bggrid.horizEdgeQuad, offset, grid.playfield.height + offset + edgeOffset, math.pi/2, -1, -1) --Bottom edge
 
   --Block drawing
   love.graphics.push()
-    love.graphics.scale(grid.scaleFactor.width/block.data.width) --Adaptive window rescaling
+    love.graphics.scale(scalar) --Adaptive window rescaling
+    love.graphics.setColor(0.5,0.5,0.5,1)
+    draw(bggrid.spriteBatch, scalarOffset, scalarOffset) --Draw the background grid
+    love.graphics.setColor(1,1,1,1)
+    --Draw grid corners
+    local scalarEdgeOffset = edgeOffset/scalar
+    local scalarWidthLength = widthLength/scalar
+    local scalarHeightLength = (grid.playfield.height + offset)/scalar
+    draw(sprite.main.img, sprite.main.sheet[4], scalarOffset - scalarEdgeOffset, scalarOffset - scalarEdgeOffset) --Top-left
+    --draw(heldImg, scalarWidthLength, scalarOffset - scalarEdgeOffset*(3/8)) --Hold indicator (is in the top-right corner)
+    --[[gfx.drawMultisprite(sprite.main.img, sprite.main.sheet,
+    {
+      {{5, math.pi/2, 1, 1}, {5, math.pi/2, 1, 1}, {5, math.pi/2, 1, 1}, {4, math.pi, 1, 1}},
+      {7, 7, 7, {5, 0, -1, 1}},
+      {6, 7, {6, math.pi, 1, 1}, {5, 0, -1, 1}},
+      {{5, math.pi/2, 1, -1}, {5, math.pi/2, 1, -1}, {5, math.pi/2, 1, -1}, {4, 0, -1, -1}},
+    }, {scalarWidthLength, scalarOffset - scalarEdgeOffset})]]
+    draw(sprite.main.img, sprite.main.sheet[4], scalarOffset - scalarEdgeOffset, scalarHeightLength + scalarEdgeOffset, 0, 1, -1) --Bottom-left
+    draw(sprite.main.img, sprite.main.sheet[4], scalarWidthLength + scalarEdgeOffset, scalarHeightLength + scalarEdgeOffset, 0, -1, -1) --Bottom-right
+    --Draw hard drop shade
     if block.current.active == true and next(block.hardDropPos) ~= nil then
       love.graphics.setColor(block.current.color[1], block.current.color[2], block.current.color[3], 0.5)
       for i=1,4 do
-        love.graphics.draw(block.data.imgShade, block.hardDropPos[i].x * block.data.width, block.hardDropPos[i].y * block.data.height)
+        draw(sprite.main.img, sprite.main.sheet[3], (block.hardDropPos[i].x * block.data.width) + scalarOffset, (block.hardDropPos[i].y * block.data.height) + scalarOffset)
       end
     end
+    --Draw stored blocks
     for k,v in pairs(block.stored) do
-      love.graphics.setColor(block.stored[k].color)
-      love.graphics.draw(block.data.img, block.stored[k].x * block.data.width, block.stored[k].y * block.data.height)
+      if block.stored[k].y >= 0 then --Blocks shouldn't render above the threshold
+        love.graphics.setColor(block.stored[k].color)
+        draw(sprite.main.img, sprite.main.sheet[2], (block.stored[k].x * block.data.width) + scalarOffset, (block.stored[k].y * block.data.height) + scalarOffset)
+      end
     end
+    --Draw active blocks
     if block.current.active == true and next(block.current.set) ~= nil then
       love.graphics.setColor(block.current.color)
       for i=1,4 do
-        love.graphics.draw(block.data.img, block.current.set[i].x * block.data.width, block.current.set[i].y * block.data.height)
+        if block.current.set[i].y >= 0 then
+          draw(sprite.main.img, sprite.main.sheet[2], (block.current.set[i].x * block.data.width) + scalarOffset, (block.current.set[i].y * block.data.height) + scalarOffset)
+        end
+      end
+      --Draw some white over the blocks when touching the ground
+      if game.gravity.groundTimer > 0 then
+        love.graphics.setColor(1,1,1,game.gravity.groundTimer/game.gravity.groundMax)
+        for i=1,4 do
+          if block.current.set[i].y >= 0 then
+            draw(sprite.main.img, sprite.main.sheet[2], (block.current.set[i].x * block.data.width) + scalarOffset, (block.current.set[i].y * block.data.height) + scalarOffset)
+          end
+        end
       end
     end
     love.graphics.setColor(1,1,1,1)
   love.graphics.pop()
 
-  --Other stuff
-  love.graphics.print(love.timer.getFPS().." fps")
-  love.graphics.print("Block Size: "..grid.scaleFactor.width.."px\nNext Blocks: "..table.concat(tetromino.nextList,", ").."\nCurrent Tetromino: "..tostring(block.current.tetromino).."\nBlock Held: "..tostring(block.current.held).."\nLines Cleared: "..tostring(game.linesCleared), 100, 124)
   if animation.quitMessage then
     love.graphics.print("Quitting in "..math.abs(math.ceil(quittimer)).."...", 100, 100)
   end
+
+  --Statistics
+  local stats = love.graphics.getStats()
+  love.graphics.setFont(font.hobo.h4)
+  love.graphics.print(love.timer.getFPS().." fps\nBlock Size: "..grid.scaleFactor.width.."px\nDraw Calls: "..stats.drawcalls.."\nTexture Memory: "..string.format("%.2f MB", stats.texturememory/1024/1024))
+  love.graphics.print("Time Played: "..string.format("%2.1f",game.timePlayed).." sec\nNext Blocks: "..table.concat(tetromino.nextList,", ").."\nCurrent Tetromino: "..tostring(block.current.tetromino).."\nBlock Held: "..tostring(block.current.held).."\nLines Cleared: "..tostring(game.linesCleared)..string.format("\nGravity: %.2fG", game.gravity.normal*60), math.floor(window.width*0.67), math.floor(offset))
 
   --Line clear animation
   if animation.lineClear.fade > 0 then

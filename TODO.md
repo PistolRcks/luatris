@@ -13,10 +13,12 @@
   * Wallkick (Done in commit b534fa2)
   * Soft/Hard drops (Partially done in commit 6702b24, completed in latest commit)
   * Specific line clear conditions (spins)
+* Quality of Life Improvements
+  * Main Menu
+  * Configurable keybinds
+  * HUD
 * FX
 * Backgrounds
-* Main Menu
-* Configurable keybinds
 
 ## Long-term
 * Other stuff???
